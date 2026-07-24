@@ -4,9 +4,11 @@ import json
 import os
 import queue
 import re
+import subprocess
 import sys
 import tkinter as tk
-from tkinter import colorchooser, font as tkfont
+from tkinter import colorchooser, font as tkfont, messagebox
+import winreg
 
 import customtkinter as ctk
 from PIL import Image, ImageDraw
@@ -90,6 +92,10 @@ NOMES_CORES = {
     "hora_extra": "Hora extra",
 }
 RE_COR_HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
+CHAVE_INICIALIZACAO_WINDOWS = (
+    r"Software\Microsoft\Windows\CurrentVersion\Run"
+)
+NOME_INICIALIZACAO_WINDOWS = "CalculoPonto"
 
 
 def caminho_configuracao():
@@ -102,6 +108,71 @@ def caminho_configuracao():
 def caminho_recurso(caminho_relativo):
     base = getattr(sys, "_MEIPASS", os.path.abspath("."))
     return os.path.join(base, caminho_relativo)
+
+
+def comando_inicializacao_windows():
+    if getattr(sys, "frozen", False):
+        argumentos = [os.path.abspath(sys.executable), "--bandeja"]
+    else:
+        executavel_python = os.path.abspath(sys.executable)
+        pasta_python = os.path.dirname(executavel_python)
+        nome_pythonw = "pythonw.exe"
+        if os.name != "nt":
+            nome_pythonw = os.path.basename(executavel_python)
+        pythonw = os.path.join(pasta_python, nome_pythonw)
+        if not os.path.exists(pythonw):
+            pythonw = executavel_python
+        argumentos = [
+            pythonw,
+            os.path.abspath(__file__),
+            "--bandeja",
+        ]
+    return subprocess.list2cmdline(argumentos)
+
+
+def ler_inicializacao_windows():
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            CHAVE_INICIALIZACAO_WINDOWS,
+            0,
+            winreg.KEY_READ,
+        ) as chave:
+            comando, _tipo = winreg.QueryValueEx(
+                chave, NOME_INICIALIZACAO_WINDOWS
+            )
+            return comando if isinstance(comando, str) else None
+    except OSError:
+        return None
+
+
+def configurar_inicializacao_windows(ativar):
+    if ativar:
+        with winreg.CreateKeyEx(
+            winreg.HKEY_CURRENT_USER,
+            CHAVE_INICIALIZACAO_WINDOWS,
+            0,
+            winreg.KEY_SET_VALUE,
+        ) as chave:
+            winreg.SetValueEx(
+                chave,
+                NOME_INICIALIZACAO_WINDOWS,
+                0,
+                winreg.REG_SZ,
+                comando_inicializacao_windows(),
+            )
+        return
+
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            CHAVE_INICIALIZACAO_WINDOWS,
+            0,
+            winreg.KEY_SET_VALUE,
+        ) as chave:
+            winreg.DeleteValue(chave, NOME_INICIALIZACAO_WINDOWS)
+    except FileNotFoundError:
+        pass
 
 
 def carregar_configuracao():
@@ -151,11 +222,12 @@ class CalculadoraSaida(ctk.CTk):
         self.configuracao = carregar_configuracao()
         self.aparencia_atual = self.configuracao["aparencia"]
         self.paleta_atual = self.configuracao["paleta"]
+        self.iniciado_na_bandeja = "--bandeja" in sys.argv[1:]
         ctk.set_appearance_mode(APARENCIAS[self.aparencia_atual]["modo"])
 
         self.title("Calculadora de Saída")
-        self.geometry("460x725")
-        self.minsize(460, 725)
+        self.geometry("460x765")
+        self.minsize(460, 700)
         self.resizable(False, True)
         self.protocol("WM_DELETE_WINDOW", self.ocultar_na_bandeja)
 
@@ -171,6 +243,18 @@ class CalculadoraSaida(ctk.CTk):
         self.aparencia_var = tk.StringVar(value=self.aparencia_atual)
         self.paleta_var = tk.StringVar(value=self.paleta_atual)
         self.marca_var = tk.BooleanVar(value=self.configuracao["exibir_marca"])
+        comando_inicio = ler_inicializacao_windows()
+        self.iniciar_windows_var = tk.BooleanVar(
+            value=comando_inicio is not None
+        )
+        if (
+            comando_inicio is not None
+            and comando_inicio != comando_inicializacao_windows()
+        ):
+            try:
+                configurar_inicializacao_windows(True)
+            except OSError:
+                pass
         self.fonte_marca_var = tk.StringVar(
             value=self.configuracao["fonte_marca"]
         )
@@ -252,6 +336,22 @@ class CalculadoraSaida(ctk.CTk):
             row=2, column=0, columnspan=2, padx=16, pady=(8, 7), sticky="w"
         )
 
+        self.check_iniciar_windows = ctk.CTkCheckBox(
+            self.preferencias,
+            text="Iniciar com o Windows",
+            variable=self.iniciar_windows_var,
+            command=self.alternar_inicializacao_windows,
+            font=("Segoe UI", 13),
+        )
+        self.check_iniciar_windows.grid(
+            row=3,
+            column=0,
+            columnspan=2,
+            padx=16,
+            pady=(7, 7),
+            sticky="w",
+        )
+
         self.botao_personalizar = ctk.CTkButton(
             self.preferencias,
             text="Personalizar marca d'água",
@@ -259,7 +359,7 @@ class CalculadoraSaida(ctk.CTk):
             height=32,
         )
         self.botao_personalizar.grid(
-            row=3,
+            row=4,
             column=0,
             columnspan=2,
             padx=16,
@@ -274,7 +374,7 @@ class CalculadoraSaida(ctk.CTk):
             height=32,
         )
         self.botao_bandeja.grid(
-            row=4,
+            row=5,
             column=0,
             columnspan=2,
             padx=16,
@@ -300,6 +400,8 @@ class CalculadoraSaida(ctk.CTk):
         self.aplicar_tema_visual()
         self.iniciar_bandeja()
         self.after(100, self.processar_comandos_bandeja)
+        if self.iniciado_na_bandeja and self.icone_bandeja is not None:
+            self.withdraw()
         if self.marca_var.get():
             self.after(150, self.criar_marca_dagua)
         self.atualizar()
@@ -422,12 +524,13 @@ class CalculadoraSaida(ctk.CTk):
                 text_color="#FFFFFF",
             )
 
-        self.check_marca.configure(
-            fg_color=paleta["destaque"],
-            hover_color=paleta["hover"],
-            border_color=paleta["destaque"],
-            text_color=visual["texto"],
-        )
+        for checkbox in (self.check_marca, self.check_iniciar_windows):
+            checkbox.configure(
+                fg_color=paleta["destaque"],
+                hover_color=paleta["hover"],
+                border_color=paleta["destaque"],
+                text_color=visual["texto"],
+            )
         for botao in (self.botao_personalizar, self.botao_bandeja):
             botao.configure(
                 fg_color=paleta["destaque"],
@@ -452,6 +555,22 @@ class CalculadoraSaida(ctk.CTk):
         else:
             self.destruir_marca_dagua()
         self.salvar_configuracao()
+
+    def alternar_inicializacao_windows(self):
+        ativar = self.iniciar_windows_var.get()
+        try:
+            configurar_inicializacao_windows(ativar)
+        except OSError as erro:
+            self.iniciar_windows_var.set(not ativar)
+            acao = "ativar" if ativar else "desativar"
+            messagebox.showerror(
+                "Inicialização com o Windows",
+                (
+                    f"Não foi possível {acao} a inicialização automática.\n\n"
+                    f"Detalhes: {erro}"
+                ),
+                parent=self,
+            )
 
     def dimensoes_marca(self):
         tamanho = self.configuracao["tamanho_fonte_marca"]

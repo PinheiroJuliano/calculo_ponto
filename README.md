@@ -18,6 +18,7 @@ Uma aplicação simples em Python para calcular o horário de saída do trabalho
 - Paletas de destaque Azul, Verde, Roxo e Âmbar
 - Preferências salvas automaticamente entre as execuções
 - Pode ser ocultada na bandeja do Windows, com opções para abrir ou sair
+- Opção para iniciar automaticamente com o Windows, já oculta na bandeja
 
 ## Tecnologias
 
@@ -69,7 +70,7 @@ python scripts/generate_icon.py
 ## Observações
 
 - O aplicativo usa `customtkinter` para interface gráfica.
-- A janela abre em `460x675` e pode ser redimensionada verticalmente.
+- A janela abre em `460x765` e pode ser redimensionada verticalmente.
 - Caso os dados de entrada estejam inválidos, a aplicação exibirá "Dados inválidos.".
 
 ## Estrutura do projeto
@@ -91,6 +92,9 @@ python scripts/generate_icon.py
 8. Use **Ocultar na bandeja do Windows** ou feche a janela pelo “X” para
    mantê-la em segundo plano. Clique duas vezes no ícone da bandeja ou use
    **Abrir** no menu; use **Sair** para encerrar o aplicativo.
+9. Marque **Iniciar com o Windows** para carregar o aplicativo
+   automaticamente e já oculto na bandeja após entrar na sua conta. Desmarque
+   a opção para remover a inicialização automática.
 
 ---
 
