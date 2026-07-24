@@ -47,12 +47,9 @@ Ela é executada em pushes para `main`, pull requests e manualmente na aba
 **Actions**. Os resultados ficam disponíveis na seção **Artifacts** de cada
 execução durante 30 dias.
 
-Para publicar os mesmos arquivos em uma GitHub Release, crie e envie uma tag:
-
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
+Cada commit enviado ou mesclado na `main` também cria automaticamente uma tag
+incremental no formato `v0.0.N` e publica os arquivos em uma GitHub Release.
+Pull requests e execuções manuais apenas geram os artefatos, sem criar tags.
 
 Para gerar localmente o ícone usado pelo PyInstaller:
 
