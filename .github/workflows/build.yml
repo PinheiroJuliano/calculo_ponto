@@ -178,10 +178,13 @@ jobs:
         run: |
           tag="v0.0.${GITHUB_RUN_NUMBER}"
 
-          if gh release view "$tag" > /dev/null 2>&1; then
-            gh release upload "$tag" release/* --clobber
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$tag" release/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
           else
             gh release create "$tag" release/* \
+              --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title "$tag" \
               --generate-notes
