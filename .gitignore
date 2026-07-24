@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+.venv/
+release/
+assets/clock.ico
+assets/clock.png

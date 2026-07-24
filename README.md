@@ -32,6 +32,35 @@ pip install customtkinter
 python app.py
 ```
 
+## Builds automáticos
+
+A workflow `Build e Release` do GitHub Actions gera:
+
+- `calculo-ponto-windows-x86_64.exe` para Windows, com ícone de relógio;
+- pacote `.deb` para Debian e Ubuntu;
+- pacote `.rpm` para Fedora;
+- pacote `.pkg.tar.zst` para Arch Linux;
+- binário Linux portátil e arquivo `.tar.gz`;
+- arquivos SHA-256 para verificação dos downloads.
+
+Ela é executada em pushes para `main`, pull requests e manualmente na aba
+**Actions**. Os resultados ficam disponíveis na seção **Artifacts** de cada
+execução durante 30 dias.
+
+Para publicar os mesmos arquivos em uma GitHub Release, crie e envie uma tag:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Para gerar localmente o ícone usado pelo PyInstaller:
+
+```bash
+python -m pip install Pillow
+python scripts/generate_icon.py
+```
+
 ## Observações
 
 - O aplicativo usa `customtkinter` para interface gráfica.
