@@ -10,6 +10,8 @@ Uma aplicação simples em Python para calcular o horário de saída do trabalho
 - Exibe o horário previsto de saída
 - Atualização em tempo real da hora atual e do tempo restante
 - Indica quando você está em hora extra
+- Marca d'água opcional, transparente e sempre visível sobre outras janelas
+- Temas Azul, Verde, Roxo, Âmbar e Claro
 
 ## Tecnologias
 
