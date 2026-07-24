@@ -11,7 +11,13 @@ Uma aplicação simples em Python para calcular o horário de saída do trabalho
 - Atualização em tempo real da hora atual e do tempo restante
 - Indica quando você está em hora extra
 - Marca d'água opcional, transparente e sempre visível sobre outras janelas
-- Temas Azul, Verde, Roxo, Âmbar e Claro
+- Marca d'água arrastável, inclusive entre monitores
+- Fonte e tamanho da marca d'água personalizáveis
+- Cores independentes para hora atual, saída, tempo restante e hora extra
+- Aparência Escura, Clara ou igual à configuração do Windows
+- Paletas de destaque Azul, Verde, Roxo e Âmbar
+- Preferências salvas automaticamente entre as execuções
+- Pode ser ocultada na bandeja do Windows, com opções para abrir ou sair
 
 ## Tecnologias
 
@@ -25,7 +31,7 @@ Uma aplicação simples em Python para calcular o horário de saída do trabalho
 2. Instale a dependência:
 
 ```bash
-pip install customtkinter
+pip install customtkinter Pillow pystray
 ```
 
 3. Execute o aplicativo:
@@ -63,7 +69,7 @@ python scripts/generate_icon.py
 ## Observações
 
 - O aplicativo usa `customtkinter` para interface gráfica.
-- A janela tem tamanho fixo de `420x420`.
+- A janela abre em `460x675` e pode ser redimensionada verticalmente.
 - Caso os dados de entrada estejam inválidos, a aplicação exibirá "Dados inválidos.".
 
 ## Estrutura do projeto
@@ -78,6 +84,13 @@ python scripts/generate_icon.py
 2. Informe o tempo de almoço em minutos.
 3. Informe a jornada de trabalho em horas.
 4. A tela exibirá o horário de saída e o tempo restante.
+5. Em **Aparência**, escolha o modo visual e a cor de destaque.
+6. Ative a marca d'água e use **Personalizar marca d'água** para escolher
+   fonte, tamanho e as cores de cada informação.
+7. Para reposicionar a marca d'água, arraste qualquer uma de suas linhas.
+8. Use **Ocultar na bandeja do Windows** ou feche a janela pelo “X” para
+   mantê-la em segundo plano. Clique duas vezes no ícone da bandeja ou use
+   **Abrir** no menu; use **Sair** para encerrar o aplicativo.
 
 ---
 
