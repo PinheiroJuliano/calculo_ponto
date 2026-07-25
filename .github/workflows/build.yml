@@ -22,6 +22,8 @@ jobs:
     steps:
       - name: Baixar o codigo
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Configurar Python
         uses: actions/setup-python@v6
@@ -33,19 +35,118 @@ jobs:
       - name: Instalar dependencias
         run: python -m pip install --disable-pip-version-check -r requirements-build.txt
 
+      - name: Testar
+        run: python -m unittest discover -s tests
+
       - name: Gerar icone de relogio
         run: python scripts/generate_icon.py
+
+      - name: Definir versao
+        id: version
+        shell: pwsh
+        run: |
+          if (
+            "${{ github.event_name }}" -eq "push" -and
+            "${{ github.ref }}" -eq "refs/heads/main"
+          ) {
+            $version = "0.0.${{ github.run_number }}"
+          } else {
+            $version = "0.0.0"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Gerar creditos e metadados
+        shell: pwsh
+        run: |
+          ./scripts/generate_contributors.ps1
+          ./scripts/generate_windows_version_info.ps1 `
+            -AppVersion "${{ steps.version.outputs.version }}"
 
       - name: Gerar executavel
         run: python -m PyInstaller --noconfirm --clean app.spec
 
+      - name: Assinar executavel quando houver certificado
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64)) {
+            "Certificado Authenticode não configurado; build sem assinatura criptográfica."
+            exit 0
+          }
+
+          $certificate = Join-Path $env:RUNNER_TEMP "pisjuliano-signing.pfx"
+          [IO.File]::WriteAllBytes(
+            $certificate,
+            [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64)
+          )
+          $signTool = Get-ChildItem `
+            "${env:ProgramFiles(x86)}\Windows Kits\10\bin" `
+            -Filter signtool.exe -Recurse |
+            Where-Object FullName -Like "*\x64\signtool.exe" |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $signTool) {
+            throw "SignTool não encontrado no runner."
+          }
+
+          & $signTool sign /fd SHA256 /f $certificate `
+            /p $env:WINDOWS_CERTIFICATE_PASSWORD `
+            /tr http://timestamp.digicert.com /td SHA256 `
+            dist\calculo-ponto.exe
+          if ($LASTEXITCODE -ne 0) {
+            throw "Falha ao assinar o executável."
+          }
+          "WINDOWS_SIGNING_ENABLED=true" >> $env:GITHUB_ENV
+          "WINDOWS_SIGNTOOL_PATH=$signTool" >> $env:GITHUB_ENV
+          "WINDOWS_CERTIFICATE_PATH=$certificate" >> $env:GITHUB_ENV
+
+      - name: Instalar Inno Setup
+        run: choco install innosetup --no-progress --yes
+
+      - name: Gerar instalador
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            $iscc = (Get-Command iscc.exe -ErrorAction Stop).Source
+          }
+          & $iscc "/DAppVersion=$env:APP_VERSION" `
+            "packaging\windows\installer.iss"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Falha ao gerar o instalador."
+          }
+
+      - name: Assinar instalador quando houver certificado
+        if: env.WINDOWS_SIGNING_ENABLED == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $installer = Get-ChildItem release -Filter "*_setup.exe" |
+            Select-Object -First 1 -ExpandProperty FullName
+          & $env:WINDOWS_SIGNTOOL_PATH sign /fd SHA256 `
+            /f $env:WINDOWS_CERTIFICATE_PATH `
+            /p $env:WINDOWS_CERTIFICATE_PASSWORD `
+            /tr http://timestamp.digicert.com /td SHA256 `
+            $installer
+          if ($LASTEXITCODE -ne 0) {
+            throw "Falha ao assinar o instalador."
+          }
+
       - name: Preparar artefato
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force release | Out-Null
-          Copy-Item dist\calculo-ponto.exe release\calculo-ponto-windows-x86_64.exe
-          $hash = (Get-FileHash release\calculo-ponto-windows-x86_64.exe -Algorithm SHA256).Hash.ToLower()
-          "$hash  calculo-ponto-windows-x86_64.exe" |
+          $installer = Get-ChildItem release -Filter "*_setup.exe" |
+            Select-Object -First 1
+          if (-not $installer) {
+            throw "O instalador não foi encontrado."
+          }
+          $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLower()
+          "$hash  $($installer.Name)" |
             Set-Content -Encoding ascii release\SHA256SUMS-windows.txt
 
       - name: Publicar artefato Windows

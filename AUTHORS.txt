@@ -1,0 +1,9 @@
+Calculadora de Saida
+
+Projeto mantido por PisJuliano e construido com as contribuicoes de:
+
+- Carlos Orlandi <carlos.orlandi@4mti.com.br>
+- lucashfsdev <lucashfsdev@gmail.com>
+- PisJuliano <pisjuliano@gmail.com>
+
+Esta lista e gerada a partir dos autores de commits do repositorio.

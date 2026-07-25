@@ -1,4 +1,5 @@
 from copy import deepcopy
+import ctypes
 from datetime import datetime, timedelta
 import json
 import os
@@ -6,6 +7,7 @@ import queue
 import re
 import subprocess
 import sys
+import threading
 import tkinter as tk
 from tkinter import colorchooser, font as tkfont, messagebox
 import winreg
@@ -80,6 +82,7 @@ CONFIG_PADRAO = {
     "aparencia": "Escuro",
     "paleta": "Azul",
     "exibir_marca": False,
+    "atalho_marca": "Ctrl+Alt+M",
     "fonte_marca": "Segoe UI",
     "tamanho_fonte_marca": 15,
     "cores_marca": CORES_MARCA_PADRAO,
@@ -96,6 +99,169 @@ CHAVE_INICIALIZACAO_WINDOWS = (
     r"Software\Microsoft\Windows\CurrentVersion\Run"
 )
 NOME_INICIALIZACAO_WINDOWS = "CalculoPonto"
+
+MODIFICADORES_ATALHO = {
+    "CTRL": ("Ctrl", 0x0002),
+    "CONTROL": ("Ctrl", 0x0002),
+    "ALT": ("Alt", 0x0001),
+    "SHIFT": ("Shift", 0x0004),
+    "WIN": ("Win", 0x0008),
+    "WINDOWS": ("Win", 0x0008),
+}
+ORDEM_MODIFICADORES = ("Ctrl", "Alt", "Shift", "Win")
+TECLAS_ESPECIAIS = {
+    "SPACE": ("Espaço", 0x20),
+    "ESPAÇO": ("Espaço", 0x20),
+    "ESPACO": ("Espaço", 0x20),
+    "HOME": ("Home", 0x24),
+    "END": ("End", 0x23),
+    "INSERT": ("Insert", 0x2D),
+    "DELETE": ("Delete", 0x2E),
+    "PAGEUP": ("PageUp", 0x21),
+    "PAGEDOWN": ("PageDown", 0x22),
+}
+
+
+def decodificar_atalho(atalho):
+    """Normaliza um atalho e retorna seu texto, modificadores e virtual key."""
+    if not isinstance(atalho, str):
+        raise ValueError("Informe um atalho de teclado.")
+
+    partes = [parte.strip() for parte in atalho.split("+")]
+    if not partes or any(not parte for parte in partes):
+        raise ValueError("Use o formato Ctrl+Alt+M.")
+
+    modificadores = {}
+    tecla = None
+    virtual_key = None
+    for parte in partes:
+        nome = parte.upper()
+        if nome in MODIFICADORES_ATALHO:
+            rotulo, valor = MODIFICADORES_ATALHO[nome]
+            modificadores[rotulo] = valor
+            continue
+        if tecla is not None:
+            raise ValueError("O atalho deve conter apenas uma tecla principal.")
+        if len(nome) == 1 and ("A" <= nome <= "Z" or "0" <= nome <= "9"):
+            tecla, virtual_key = nome, ord(nome)
+        elif re.fullmatch(r"F(?:[1-9]|1[0-9]|2[0-4])", nome):
+            numero = int(nome[1:])
+            tecla, virtual_key = nome, 0x70 + numero - 1
+        elif nome in TECLAS_ESPECIAIS:
+            tecla, virtual_key = TECLAS_ESPECIAIS[nome]
+        else:
+            raise ValueError(f"A tecla “{parte}” não é suportada.")
+
+    if tecla is None:
+        raise ValueError("Inclua uma tecla principal no atalho.")
+    if not modificadores and not tecla.startswith("F"):
+        raise ValueError("Use Ctrl, Alt, Shift ou Win junto com a tecla.")
+
+    nomes = [
+        nome for nome in ORDEM_MODIFICADORES if nome in modificadores
+    ]
+    texto = "+".join([*nomes, tecla])
+    mascara = sum(modificadores.values())
+    return texto, mascara, virtual_key
+
+
+class AtalhoGlobalWindows:
+    """Registra um atalho global sem instalar um gancho de teclado."""
+
+    WM_HOTKEY = 0x0312
+    WM_QUIT = 0x0012
+    MOD_NOREPEAT = 0x4000
+    IDENTIFICADOR = 1
+
+    class Ponto(ctypes.Structure):
+        _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+    class Mensagem(ctypes.Structure):
+        pass
+
+    Mensagem._fields_ = [
+        ("hwnd", ctypes.c_void_p),
+        ("message", ctypes.c_uint),
+        ("wParam", ctypes.c_size_t),
+        ("lParam", ctypes.c_ssize_t),
+        ("time", ctypes.c_ulong),
+        ("pt", Ponto),
+        ("lPrivate", ctypes.c_ulong),
+    ]
+
+    def __init__(self, callback):
+        self.callback = callback
+        self.thread = None
+        self.thread_id = None
+        self._pronto = None
+        self._erro = None
+
+    def configurar(self, atalho):
+        _texto, modificadores, virtual_key = decodificar_atalho(atalho)
+        self.parar()
+        self._pronto = threading.Event()
+        self._erro = None
+        self.thread = threading.Thread(
+            target=self._executar,
+            args=(modificadores, virtual_key),
+            name="atalho-global-marca",
+            daemon=True,
+        )
+        self.thread.start()
+        if not self._pronto.wait(timeout=2):
+            self.parar()
+            raise OSError("O Windows não respondeu ao registro do atalho.")
+        if self._erro is not None:
+            erro = self._erro
+            self.parar()
+            raise erro
+
+    def _executar(self, modificadores, virtual_key):
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        self.thread_id = kernel32.GetCurrentThreadId()
+        registrado = user32.RegisterHotKey(
+            None,
+            self.IDENTIFICADOR,
+            modificadores | self.MOD_NOREPEAT,
+            virtual_key,
+        )
+        if not registrado:
+            codigo = ctypes.get_last_error()
+            self._erro = OSError(
+                codigo,
+                "O atalho já está em uso por outro programa."
+                if codigo == 1409
+                else "Não foi possível registrar o atalho global.",
+            )
+            self._pronto.set()
+            return
+
+        self._pronto.set()
+        mensagem = self.Mensagem()
+        try:
+            while user32.GetMessageW(
+                ctypes.byref(mensagem), None, 0, 0
+            ) > 0:
+                if (
+                    mensagem.message == self.WM_HOTKEY
+                    and mensagem.wParam == self.IDENTIFICADOR
+                ):
+                    self.callback()
+        finally:
+            user32.UnregisterHotKey(None, self.IDENTIFICADOR)
+
+    def parar(self):
+        thread = self.thread
+        if thread is None:
+            return
+        if thread.is_alive() and self.thread_id is not None:
+            ctypes.windll.user32.PostThreadMessageW(
+                self.thread_id, self.WM_QUIT, 0, 0
+            )
+            thread.join(timeout=2)
+        self.thread = None
+        self.thread_id = None
 
 
 def caminho_configuracao():
@@ -189,6 +355,12 @@ def carregar_configuracao():
         config["paleta"] = salva["paleta"]
     if isinstance(salva.get("exibir_marca"), bool):
         config["exibir_marca"] = salva["exibir_marca"]
+    try:
+        config["atalho_marca"] = decodificar_atalho(
+            salva.get("atalho_marca")
+        )[0]
+    except ValueError:
+        pass
     if isinstance(salva.get("fonte_marca"), str) and salva["fonte_marca"].strip():
         config["fonte_marca"] = salva["fonte_marca"].strip()
 
@@ -226,8 +398,8 @@ class CalculadoraSaida(ctk.CTk):
         ctk.set_appearance_mode(APARENCIAS[self.aparencia_atual]["modo"])
 
         self.title("Calculadora de Saída")
-        self.geometry("460x765")
-        self.minsize(460, 700)
+        self.geometry("460x805")
+        self.minsize(460, 740)
         self.resizable(False, True)
         self.protocol("WM_DELETE_WINDOW", self.ocultar_na_bandeja)
 
@@ -238,11 +410,15 @@ class CalculadoraSaida(ctk.CTk):
         self.arraste_marca = None
         self.icone_bandeja = None
         self.comandos_bandeja = queue.Queue()
+        self.atalho_global = None
         self.encerrando = False
 
         self.aparencia_var = tk.StringVar(value=self.aparencia_atual)
         self.paleta_var = tk.StringVar(value=self.paleta_atual)
         self.marca_var = tk.BooleanVar(value=self.configuracao["exibir_marca"])
+        self.atalho_marca_var = tk.StringVar(
+            value=self.configuracao["atalho_marca"]
+        )
         comando_inicio = ler_inicializacao_windows()
         self.iniciar_windows_var = tk.BooleanVar(
             value=comando_inicio is not None
@@ -344,12 +520,37 @@ class CalculadoraSaida(ctk.CTk):
             font=("Segoe UI", 13),
         )
         self.check_iniciar_windows.grid(
-            row=3,
+            row=4,
             column=0,
             columnspan=2,
             padx=16,
             pady=(7, 7),
             sticky="w",
+        )
+
+        self.lbl_atalho_marca = ctk.CTkLabel(
+            self.preferencias,
+            text="Atalho global da marca d'água",
+            font=("Segoe UI", 13),
+        )
+        self.lbl_atalho_marca.grid(
+            row=3, column=0, padx=(16, 8), pady=7, sticky="w"
+        )
+
+        self.entrada_atalho_marca = ctk.CTkEntry(
+            self.preferencias,
+            textvariable=self.atalho_marca_var,
+            width=126,
+            justify="center",
+        )
+        self.entrada_atalho_marca.grid(
+            row=3, column=1, padx=(8, 16), pady=7, sticky="e"
+        )
+        self.entrada_atalho_marca.bind(
+            "<Return>", self.aplicar_atalho_marca
+        )
+        self.entrada_atalho_marca.bind(
+            "<FocusOut>", self.aplicar_atalho_marca
         )
 
         self.botao_personalizar = ctk.CTkButton(
@@ -359,7 +560,7 @@ class CalculadoraSaida(ctk.CTk):
             height=32,
         )
         self.botao_personalizar.grid(
-            row=4,
+            row=5,
             column=0,
             columnspan=2,
             padx=16,
@@ -374,7 +575,7 @@ class CalculadoraSaida(ctk.CTk):
             height=32,
         )
         self.botao_bandeja.grid(
-            row=5,
+            row=6,
             column=0,
             columnspan=2,
             padx=16,
@@ -399,6 +600,7 @@ class CalculadoraSaida(ctk.CTk):
 
         self.aplicar_tema_visual()
         self.iniciar_bandeja()
+        self.iniciar_atalho_global()
         self.after(100, self.processar_comandos_bandeja)
         if self.iniciado_na_bandeja and self.icone_bandeja is not None:
             self.withdraw()
@@ -510,7 +712,11 @@ class CalculadoraSaida(ctk.CTk):
                 text_color=visual["texto"],
             )
 
-        for rotulo in (self.lbl_aparencia, self.lbl_paleta):
+        for rotulo in (
+            self.lbl_aparencia,
+            self.lbl_paleta,
+            self.lbl_atalho_marca,
+        ):
             rotulo.configure(text_color=visual["texto"])
 
         for seletor in (self.seletor_aparencia, self.seletor_paleta):
@@ -531,6 +737,11 @@ class CalculadoraSaida(ctk.CTk):
                 border_color=paleta["destaque"],
                 text_color=visual["texto"],
             )
+        self.entrada_atalho_marca.configure(
+            fg_color=visual["entrada"],
+            border_color=paleta["destaque"],
+            text_color=visual["texto"],
+        )
         for botao in (self.botao_personalizar, self.botao_bandeja):
             botao.configure(
                 fg_color=paleta["destaque"],
@@ -554,6 +765,57 @@ class CalculadoraSaida(ctk.CTk):
             self.criar_marca_dagua()
         else:
             self.destruir_marca_dagua()
+        self.salvar_configuracao()
+
+    def iniciar_atalho_global(self):
+        self.atalho_global = AtalhoGlobalWindows(
+            lambda: self.comandos_bandeja.put("alternar_marca")
+        )
+        try:
+            self.atalho_global.configurar(
+                self.configuracao["atalho_marca"]
+            )
+        except OSError as erro:
+            atalho = self.configuracao["atalho_marca"]
+            detalhes = str(erro)
+            self.after(
+                250,
+                lambda atalho=atalho, detalhes=detalhes: messagebox.showwarning(
+                    "Atalho global",
+                    (
+                        f"Não foi possível ativar o atalho {atalho}.\n\n"
+                        f"Detalhes: {detalhes}"
+                    ),
+                    parent=self,
+                ),
+            )
+
+    def aplicar_atalho_marca(self, _evento=None):
+        anterior = self.configuracao["atalho_marca"]
+        try:
+            novo = decodificar_atalho(self.atalho_marca_var.get())[0]
+            if novo == anterior:
+                self.atalho_marca_var.set(novo)
+                return
+            self.atalho_global.configurar(novo)
+        except (OSError, ValueError) as erro:
+            self.atalho_marca_var.set(anterior)
+            try:
+                self.atalho_global.configurar(anterior)
+            except OSError:
+                pass
+            messagebox.showerror(
+                "Atalho global",
+                (
+                    "Não foi possível usar esse atalho.\n\n"
+                    f"{erro}\n\nExemplo válido: Ctrl+Alt+M"
+                ),
+                parent=self,
+            )
+            return
+
+        self.configuracao["atalho_marca"] = novo
+        self.atalho_marca_var.set(novo)
         self.salvar_configuracao()
 
     def alternar_inicializacao_windows(self):
@@ -1040,6 +1302,12 @@ class CalculadoraSaida(ctk.CTk):
                 default=True,
             ),
             pystray.MenuItem(
+                "Alternar marca d'água",
+                lambda _icone, _item: self.comandos_bandeja.put(
+                    "alternar_marca"
+                ),
+            ),
+            pystray.MenuItem(
                 "Sair",
                 lambda _icone, _item: self.comandos_bandeja.put("sair"),
             ),
@@ -1063,6 +1331,9 @@ class CalculadoraSaida(ctk.CTk):
                 comando = self.comandos_bandeja.get_nowait()
                 if comando == "abrir":
                     self.mostrar_janela()
+                elif comando == "alternar_marca":
+                    self.marca_var.set(not self.marca_var.get())
+                    self.alternar_marca_dagua()
                 elif comando == "sair":
                     self.fechar()
                     return
@@ -1113,6 +1384,9 @@ class CalculadoraSaida(ctk.CTk):
             return
         self.encerrando = True
         self.salvar_configuracao()
+        if self.atalho_global is not None:
+            self.atalho_global.parar()
+            self.atalho_global = None
         if self.icone_bandeja is not None:
             self.icone_bandeja.stop()
             self.icone_bandeja = None
