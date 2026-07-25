@@ -398,8 +398,8 @@ class CalculadoraSaida(ctk.CTk):
         ctk.set_appearance_mode(APARENCIAS[self.aparencia_atual]["modo"])
 
         self.title("Calculadora de Saída")
-        self.geometry("460x805")
-        self.minsize(460, 740)
+        self.geometry("460x840")
+        self.minsize(460, 775)
         self.resizable(False, True)
         self.protocol("WM_DELETE_WINDOW", self.ocultar_na_bandeja)
 
@@ -520,7 +520,7 @@ class CalculadoraSaida(ctk.CTk):
             font=("Segoe UI", 13),
         )
         self.check_iniciar_windows.grid(
-            row=4,
+            row=5,
             column=0,
             columnspan=2,
             padx=16,
@@ -530,11 +530,16 @@ class CalculadoraSaida(ctk.CTk):
 
         self.lbl_atalho_marca = ctk.CTkLabel(
             self.preferencias,
-            text="Atalho global da marca d'água",
+            text="Atalho (ocultar/desocultar) da marca d'água",
             font=("Segoe UI", 13),
         )
         self.lbl_atalho_marca.grid(
-            row=3, column=0, padx=(16, 8), pady=7, sticky="w"
+            row=3,
+            column=0,
+            columnspan=2,
+            padx=16,
+            pady=(7, 2),
+            sticky="w",
         )
 
         self.entrada_atalho_marca = ctk.CTkEntry(
@@ -544,7 +549,12 @@ class CalculadoraSaida(ctk.CTk):
             justify="center",
         )
         self.entrada_atalho_marca.grid(
-            row=3, column=1, padx=(8, 16), pady=7, sticky="e"
+            row=4,
+            column=0,
+            columnspan=2,
+            padx=16,
+            pady=(2, 7),
+            sticky="ew",
         )
         self.entrada_atalho_marca.bind(
             "<Return>", self.aplicar_atalho_marca
@@ -560,7 +570,7 @@ class CalculadoraSaida(ctk.CTk):
             height=32,
         )
         self.botao_personalizar.grid(
-            row=5,
+            row=6,
             column=0,
             columnspan=2,
             padx=16,
@@ -575,7 +585,7 @@ class CalculadoraSaida(ctk.CTk):
             height=32,
         )
         self.botao_bandeja.grid(
-            row=6,
+            row=7,
             column=0,
             columnspan=2,
             padx=16,

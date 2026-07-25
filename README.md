@@ -85,7 +85,7 @@ python scripts/generate_icon.py
 ## Observações
 
 - O aplicativo usa `customtkinter` para interface gráfica.
-- A janela abre em `460x805` e pode ser redimensionada verticalmente.
+- A janela abre em `460x840` e pode ser redimensionada verticalmente.
 - Caso os dados de entrada estejam inválidos, a aplicação exibirá "Dados inválidos.".
 
 ## Estrutura do projeto
@@ -103,7 +103,7 @@ python scripts/generate_icon.py
 5. Em **Aparência**, escolha o modo visual e a cor de destaque.
 6. Ative a marca d'água e use **Personalizar marca d'água** para escolher
    fonte, tamanho e as cores de cada informação.
-7. Em **Atalho global da marca d'água**, informe uma combinação como
+7. Em **Atalho (ocultar/desocultar) da marca d'água**, informe uma combinação como
    `Ctrl+Alt+M` e pressione `Enter`. O atalho funciona mesmo com a aplicação
    oculta na bandeja.
 8. Para reposicionar a marca d'água, arraste qualquer uma de suas linhas.
