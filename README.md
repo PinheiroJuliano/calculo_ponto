@@ -42,6 +42,9 @@ O projeto possui duas implementações:
 - Atalho global configurável para ocultar ou exibir a marca d'água.
 - Execução em segundo plano pela bandeja do Windows.
 - Inicialização automática com o Windows, já oculta na bandeja.
+- Histórico diário local com gráficos de linhas ou colunas.
+- Estatísticas mensais de horas extras, débitos e saldo.
+- Página Sobre com versão, contribuidores e links para o GitHub.
 
 ### Recursos exclusivos do Linux
 
@@ -161,6 +164,56 @@ No ícone da bandeja:
 Marque **Iniciar com o Windows** para abrir o aplicativo automaticamente, já
 oculto na bandeja, depois de entrar na sua conta.
 
+### 6. Consultar o histórico
+
+Clique no botão **Menu**, no canto superior direito, e selecione
+**Histórico**. Também é possível pressionar `Ctrl+H`.
+
+![Menu de acesso às páginas do aplicativo](docs/images/menu-paginas.png)
+
+![Histórico exibido como gráfico de linhas](docs/images/historico-linhas.png)
+
+O histórico mantém um registro consolidado por dia. A tela permite:
+
+- alternar a visualização entre **Linhas** e **Colunas**;
+- consultar o saldo diário dos últimos 30 registros;
+- conferir os registros mais recentes com entrada, saída e saldo;
+- escolher um intervalo de gravação entre 5 e 120 segundos.
+
+![Histórico exibido como gráfico de colunas](docs/images/historico-colunas.png)
+
+O registro do dia atual é provisório e representa o saldo caso a jornada
+terminasse naquele momento. O mesmo registro é atualizado no intervalo
+escolhido, sem adicionar uma nova linha ao JSON a cada gravação.
+
+### 7. Acompanhar as estatísticas
+
+No botão **Menu**, selecione **Estatísticas** ou pressione `Ctrl+E`.
+
+![Página de estatísticas mensais](docs/images/estatisticas.png)
+
+A página apresenta:
+
+- horas extras acumuladas no mês;
+- horas devidas no mês;
+- saldo total do período;
+- quantidade de dias registrados;
+- média diária;
+- melhor e pior saldo diário.
+
+Os cartões são atualizados quando um novo registro do histórico é consolidado.
+
+### 8. Ver versão e contribuidores
+
+No botão **Menu**, selecione **Sobre** ou pressione `Ctrl+B`.
+
+![Página Sobre](docs/images/sobre.png)
+
+A página exibe o ícone e a versão do aplicativo, os contribuidores e botões
+para abrir cada perfil no GitHub. A versão é lida dos metadados do executável
+instalado; ao executar diretamente pelo código-fonte, é exibida a versão de
+desenvolvimento `0.0.0`.
+
 ## Como usar no Linux
 
 ![Painel da Calculadora de Ponto no terminal Linux](docs/images/linux-terminal.png)
@@ -244,6 +297,7 @@ go build -o calculo-ponto .
 | Plataforma | Arquivo |
 | --- | --- |
 | Windows | `%APPDATA%\CalculoPonto\config.json` |
+| Histórico do Windows | `%APPDATA%\CalculoPonto\historico.json` |
 | Linux | `~/.config/ponto/config.json` |
 
 No Windows, a opção **Iniciar com o Windows** também gerencia a entrada
@@ -255,6 +309,7 @@ No Windows, a opção **Iniciar com o Windows** também gerencia a entrada
 .
 ├── app.py                         # Aplicativo gráfico para Windows
 ├── app.spec                       # Empacotamento do executável Windows
+├── historico.py                   # Persistência e estatísticas do histórico
 ├── assets/                        # Ícone do aplicativo
 ├── docs/images/                   # Capturas usadas neste guia
 ├── linux/calculo_ponto/           # Implementação Linux em Go
