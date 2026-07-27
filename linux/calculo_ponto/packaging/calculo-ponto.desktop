@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Calculadora de Ponto
+Comment=Calculadora de jornada e relogio overlay
+Exec=calculo-ponto
+Icon=calculo-ponto
+Terminal=true
+Categories=Utility;Office;
+Keywords=ponto;relogio;cronometro;jornada;

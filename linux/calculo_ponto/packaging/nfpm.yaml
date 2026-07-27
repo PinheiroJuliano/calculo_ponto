@@ -1,0 +1,59 @@
+name: calculo-ponto
+arch: amd64
+platform: linux
+version: "${VERSION}"
+release: "${PACKAGE_RELEASE}"
+section: utils
+priority: optional
+maintainer: Calculadora de Ponto contributors
+description: |
+  Calculadora de jornada com painel interativo no terminal e
+  relogio overlay flutuante para o desktop.
+homepage: https://github.com/${GITHUB_REPOSITORY}
+contents:
+  - src: release/calculo-ponto
+    dst: /usr/bin/calculo-ponto
+    file_info:
+      mode: 0755
+  - src: ../../assets/clock.png
+    dst: /usr/share/icons/hicolor/256x256/apps/calculo-ponto.png
+    file_info:
+      mode: 0644
+  - src: packaging/calculo-ponto.desktop
+    dst: /usr/share/applications/calculo-ponto.desktop
+    file_info:
+      mode: 0644
+overrides:
+  deb:
+    depends:
+      - libc6
+      - libgl1
+      - libx11-6
+      - libxcursor1
+      - libxi6
+      - libxinerama1
+      - libxrandr2
+      - libxxf86vm1
+      - libasound2
+  rpm:
+    depends:
+      - glibc
+      - libglvnd-glx
+      - libX11
+      - libXcursor
+      - libXi
+      - libXinerama
+      - libXrandr
+      - libXxf86vm
+      - alsa-lib
+  archlinux:
+    depends:
+      - glibc
+      - libglvnd
+      - libx11
+      - libxcursor
+      - libxi
+      - libxinerama
+      - libxrandr
+      - libxxf86vm
+      - alsa-lib

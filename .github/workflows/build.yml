@@ -1,0 +1,292 @@
+name: Build e Release
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows x86_64
+    runs-on: windows-latest
+
+    steps:
+      - name: Baixar o codigo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Configurar Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-build.txt
+
+      - name: Instalar dependencias
+        run: python -m pip install --disable-pip-version-check -r requirements-build.txt
+
+      - name: Testar
+        run: python -m unittest discover -s tests
+
+      - name: Gerar icone de relogio
+        run: python scripts/generate_icon.py
+
+      - name: Definir versao
+        id: version
+        shell: pwsh
+        run: |
+          if (
+            "${{ github.event_name }}" -eq "push" -and
+            "${{ github.ref }}" -eq "refs/heads/main"
+          ) {
+            $version = "0.0.${{ github.run_number }}"
+          } else {
+            $version = "0.0.0"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Gerar creditos e metadados
+        shell: pwsh
+        run: |
+          ./scripts/generate_contributors.ps1
+          ./scripts/generate_windows_version_info.ps1 `
+            -AppVersion "${{ steps.version.outputs.version }}"
+
+      - name: Gerar executavel
+        run: python -m PyInstaller --noconfirm --clean app.spec
+
+      - name: Assinar executavel quando houver certificado
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64)) {
+            "Certificado Authenticode não configurado; build sem assinatura criptográfica."
+            exit 0
+          }
+
+          $certificate = Join-Path $env:RUNNER_TEMP "pisjuliano-signing.pfx"
+          [IO.File]::WriteAllBytes(
+            $certificate,
+            [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64)
+          )
+          $signTool = Get-ChildItem `
+            "${env:ProgramFiles(x86)}\Windows Kits\10\bin" `
+            -Filter signtool.exe -Recurse |
+            Where-Object FullName -Like "*\x64\signtool.exe" |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $signTool) {
+            throw "SignTool não encontrado no runner."
+          }
+
+          & $signTool sign /fd SHA256 /f $certificate `
+            /p $env:WINDOWS_CERTIFICATE_PASSWORD `
+            /tr http://timestamp.digicert.com /td SHA256 `
+            dist\calculo-ponto.exe
+          if ($LASTEXITCODE -ne 0) {
+            throw "Falha ao assinar o executável."
+          }
+          "WINDOWS_SIGNING_ENABLED=true" >> $env:GITHUB_ENV
+          "WINDOWS_SIGNTOOL_PATH=$signTool" >> $env:GITHUB_ENV
+          "WINDOWS_CERTIFICATE_PATH=$certificate" >> $env:GITHUB_ENV
+
+      - name: Instalar Inno Setup
+        run: choco install innosetup --no-progress --yes
+
+      - name: Gerar instalador
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            $iscc = (Get-Command iscc.exe -ErrorAction Stop).Source
+          }
+          & $iscc "/DAppVersion=$env:APP_VERSION" `
+            "packaging\windows\installer.iss"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Falha ao gerar o instalador."
+          }
+
+      - name: Assinar instalador quando houver certificado
+        if: env.WINDOWS_SIGNING_ENABLED == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $installer = Get-ChildItem release -Filter "*_setup.exe" |
+            Select-Object -First 1 -ExpandProperty FullName
+          & $env:WINDOWS_SIGNTOOL_PATH sign /fd SHA256 `
+            /f $env:WINDOWS_CERTIFICATE_PATH `
+            /p $env:WINDOWS_CERTIFICATE_PASSWORD `
+            /tr http://timestamp.digicert.com /td SHA256 `
+            $installer
+          if ($LASTEXITCODE -ne 0) {
+            throw "Falha ao assinar o instalador."
+          }
+
+      - name: Preparar artefato
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem release -Filter "*_setup.exe" |
+            Select-Object -First 1
+          if (-not $installer) {
+            throw "O instalador não foi encontrado."
+          }
+          $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLower()
+          "$hash  $($installer.Name)" |
+            Set-Content -Encoding ascii release\SHA256SUMS-windows.txt
+
+      - name: Publicar artefato Windows
+        uses: actions/upload-artifact@v7
+        with:
+          name: calculo-ponto-windows-x86_64
+          path: release/
+          if-no-files-found: error
+          retention-days: 30
+
+  linux:
+    name: Linux x86_64
+    # Compilar em uma glibc mais antiga amplia a compatibilidade do binario
+    # com versoes atuais e anteriores de Debian, Fedora e Arch.
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: linux/calculo_ponto
+
+    steps:
+      - name: Baixar o codigo
+        uses: actions/checkout@v6
+
+      - name: Configurar Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: linux/calculo_ponto/go.mod
+          cache-dependency-path: linux/calculo_ponto/go.sum
+
+      - name: Configurar Python para gerar o icone
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Instalar dependencias de compilacao
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            libc6-dev \
+            libgl1-mesa-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libxrandr-dev \
+            libxxf86vm-dev \
+            libasound2-dev \
+            pkg-config
+          python -m pip install --disable-pip-version-check "Pillow>=11,<13"
+
+      - name: Testar
+        run: go test ./...
+
+      - name: Definir versao
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/main" ]]; then
+            version="0.0.${GITHUB_RUN_NUMBER}"
+            release="1"
+          else
+            version="0.0.0"
+            release="$GITHUB_RUN_NUMBER"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
+      - name: Compilar binario
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          mkdir -p release
+          go build -trimpath -ldflags="-s -w" -o release/calculo-ponto .
+          chmod 0755 release/calculo-ponto
+
+      - name: Gerar icone Linux
+        run: python ../../scripts/generate_icon.py
+
+      - name: Instalar nFPM
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.47.0
+
+      - name: Gerar pacotes Debian, Fedora e Arch
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          PACKAGE_RELEASE: ${{ steps.version.outputs.release }}
+        run: |
+          nfpm package --config packaging/nfpm.yaml --packager deb \
+            --target "release/calculo-ponto_${VERSION}-${PACKAGE_RELEASE}_amd64.deb"
+          nfpm package --config packaging/nfpm.yaml --packager rpm \
+            --target "release/calculo-ponto-${VERSION}-${PACKAGE_RELEASE}.x86_64.rpm"
+          nfpm package --config packaging/nfpm.yaml --packager archlinux \
+            --target "release/calculo-ponto-${VERSION}-${PACKAGE_RELEASE}-x86_64.pkg.tar.zst"
+
+      - name: Empacotar binario portatil e checksums
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          tar -C release -czf "release/calculo-ponto_${VERSION}_linux_x86_64.tar.gz" calculo-ponto
+          cd release
+          sha256sum calculo-ponto *.deb *.rpm *.pkg.tar.zst *.tar.gz > SHA256SUMS-linux.txt
+
+      - name: Publicar artefatos Linux
+        uses: actions/upload-artifact@v7
+        with:
+          name: calculo-ponto-linux-x86_64
+          path: linux/calculo_ponto/release/
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publicar GitHub Release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - windows
+      - linux
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Baixar todos os artefatos
+        uses: actions/download-artifact@v8
+        with:
+          pattern: calculo-ponto-*
+          path: release
+          merge-multiple: true
+
+      - name: Criar release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v0.0.${GITHUB_RUN_NUMBER}"
+
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$tag" release/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create "$tag" release/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "$tag" \
+              --generate-notes
+          fi
